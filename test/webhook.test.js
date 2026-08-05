@@ -235,6 +235,29 @@ test('getClaudeReply includes output_config.effort for claude-opus-5', async () 
   assert.equal(capturedParams.thinking.type, 'disabled');
 });
 
+test('getClaudeReply sends the system prompt as a cached content block', async () => {
+  let capturedParams;
+  const anthropicClient = {
+    messages: {
+      create: async (params) => {
+        capturedParams = params;
+        return { stop_reason: 'end_turn', content: [{ type: 'text', text: 'ok' }] };
+      },
+    },
+  };
+
+  await getClaudeReply({
+    anthropicClient,
+    userText: '哈囉',
+    systemPrompt: 'system prompt text',
+    model: 'claude-haiku-4-5',
+  });
+
+  assert.ok(Array.isArray(capturedParams.system));
+  assert.equal(capturedParams.system[0].text, 'system prompt text');
+  assert.deepEqual(capturedParams.system[0].cache_control, { type: 'ephemeral' });
+});
+
 test('buildSystemPrompt embeds the knowledge base content', () => {
   const prompt = buildSystemPrompt('營業時間：週一至週五 9:00-18:00');
   assert.match(prompt, /營業時間：週一至週五 9:00-18:00/);
