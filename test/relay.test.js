@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const crypto = require('crypto');
 const request = require('supertest');
 
-const { createRelayApp, DEFAULT_TEST_LABEL } = require('../relay-server');
+const { createRelayApp, DEFAULT_BOT_LABEL } = require('../relay-server');
 const { buildSystemPrompt } = require('../server');
 
 const CHANNEL_SECRET = 'test-channel-secret';
@@ -118,7 +118,7 @@ test('POST /webhook forwards the raw body to EasyStore and pushes a labeled Clau
   assert.equal(pushSpy.calls.length, 1);
   assert.equal(pushSpy.calls[0].userId, 'U_real_user');
   assert.equal(pushSpy.calls[0].channelAccessToken, CHANNEL_ACCESS_TOKEN);
-  assert.equal(pushSpy.calls[0].text, DEFAULT_TEST_LABEL + '您好，這是測試回覆。');
+  assert.equal(pushSpy.calls[0].text, DEFAULT_BOT_LABEL + '您好，這是測試回覆。');
 });
 
 test('POST /webhook still forwards non-text events to EasyStore but does not push', async () => {

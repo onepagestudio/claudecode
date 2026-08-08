@@ -1,1 +1,1 @@
-web: node server.js
+web: node relay-server.js

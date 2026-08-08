@@ -4,7 +4,12 @@ services:
     runtime: node
     plan: free
     buildCommand: npm install
-    startCommand: npm start
+    # relay-server.js is the production entry point while this channel
+    # coexists with EasyStore: it forwards the raw webhook to EasyStore
+    # (for back-office visibility) and separately pushes the Claude reply.
+    # Switch to `npm start` (server.js) only after fully migrating off
+    # EasyStore's LINE integration.
+    startCommand: npm run relay
     healthCheckPath: /
     envVars:
       - key: LINE_CHANNEL_ACCESS_TOKEN
@@ -12,6 +17,8 @@ services:
       - key: LINE_CHANNEL_SECRET
         sync: false
       - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: EASYSTORE_WEBHOOK_URL
         sync: false
       - key: CLAUDE_MODEL
         value: claude-haiku-4-5

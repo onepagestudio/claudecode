@@ -1,21 +1,26 @@
-// Temporary coexistence relay: lets this bot run alongside an existing
+// Permanent coexistence relay: runs this bot alongside the existing
 // EasyStore LINE integration on the SAME LINE Official Account webhook,
 // without disrupting EasyStore's flow.
 //
 // LINE only allows one Webhook URL per channel, and each event's replyToken
-// can only be consumed once. Since EasyStore already uses the Reply API for
-// this channel, this relay:
+// can only be consumed once. EasyStore uses this channel's webhook only to
+// surface incoming customer messages in its own back office (for optional
+// manual staff reply) and does not auto-reply to them; order-shipped
+// notifications are sent separately via the Push API and are unaffected by
+// any of this. So this relay:
 //   1. Verifies the LINE signature once.
 //   2. Forwards the raw, unmodified webhook body to EasyStore immediately,
-//      so their existing behavior is completely unaffected.
+//      so their back-office visibility and manual-reply option keep working.
 //   3. Independently asks Claude for a reply and sends it via the LINE
 //      Push API (a separate message, not tied to the reply token) so it
-//      never competes with EasyStore for the same reply token.
+//      never competes with EasyStore for the same reply token — this is
+//      the customer-facing reply, since EasyStore doesn't send one itself.
 //
-// This is meant as a TEMPORARY testing bridge on a live/production account.
-// Once you decide whether to fully switch this channel over to this bot
-// (dropping EasyStore's LINE integration) or keep them separate permanently,
-// point LINE's Webhook URL at server.js's /webhook instead and retire this file.
+// This is the intended PRODUCTION entry point for as long as this channel
+// coexists with EasyStore. Deploy this file (not server.js) to Render/
+// Railway. server.js remains available for a future full migration off
+// EasyStore, where LINE's Webhook URL would point at server.js's /webhook
+// (using the Reply API directly) instead.
 
 require('dotenv').config();
 
@@ -32,8 +37,8 @@ const {
 const FORWARD_TIMEOUT_MS = 8000;
 const PUSH_TIMEOUT_MS = 10000;
 const LINE_TEXT_MAX_LENGTH = 5000;
-const DEFAULT_TEST_LABEL =
-  '（測試訊息：這是新客服機器人的測試回覆，正式問題請以上方訊息為準）\n\n';
+const DEFAULT_BOT_LABEL =
+  '您好🤍 這是 DUMO 獨墨的 AI 客服小幫手，為您優先解答常見問題；如需真人客服協助，隨時告訴我們即可。\n\n';
 
 /**
  * Forwards the exact raw webhook body to EasyStore's LINE webhook endpoint,
@@ -124,7 +129,7 @@ async function handleEventViaPush(event, ctx) {
       return;
     }
     const userId = event.source && event.source.userId;
-    if (!userId) return; // group/room events without a resolvable user are skipped in this test bridge
+    if (!userId) return; // group/room events without a resolvable user are skipped by this relay
 
     const replyText = await getClaudeReply({
       anthropicClient: ctx.anthropicClient,
@@ -136,7 +141,7 @@ async function handleEventViaPush(event, ctx) {
     await ctx.pushImpl({
       channelAccessToken: ctx.lineChannelAccessToken,
       userId,
-      text: ctx.testLabel + replyText,
+      text: ctx.botLabel + replyText,
       fetchImpl: ctx.fetchImpl,
     });
   } catch (err) {
@@ -151,7 +156,7 @@ function createRelayApp({
   easyStoreWebhookUrl,
   systemPrompt,
   model = DEFAULT_MODEL,
-  testLabel = DEFAULT_TEST_LABEL,
+  botLabel = DEFAULT_BOT_LABEL,
   fetchImpl = fetch,
   forwardImpl = forwardToEasyStore,
   pushImpl = pushToLine,
@@ -195,7 +200,7 @@ function createRelayApp({
             lineChannelAccessToken,
             systemPrompt,
             model,
-            testLabel,
+            botLabel,
             fetchImpl,
             pushImpl,
           })
@@ -265,5 +270,5 @@ module.exports = {
   forwardToEasyStore,
   pushToLine,
   handleEventViaPush,
-  DEFAULT_TEST_LABEL,
+  DEFAULT_BOT_LABEL,
 };
