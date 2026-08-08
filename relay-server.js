@@ -37,8 +37,12 @@ const {
 const FORWARD_TIMEOUT_MS = 8000;
 const PUSH_TIMEOUT_MS = 10000;
 const LINE_TEXT_MAX_LENGTH = 5000;
+// No emoji here on purpose — the system prompt caps Claude's own reply at
+// one emoji per message, and this label is prepended to that reply, so
+// giving the label its own emoji too would push the combined message over
+// the limit.
 const DEFAULT_BOT_LABEL =
-  '您好🤍 這是 DUMO 獨墨的 AI 客服小幫手，為您優先解答常見問題；如需真人客服協助，隨時告訴我們即可。\n\n';
+  '您好，這是 DUMO 獨茉的 AI 客服小幫手，為您優先解答常見問題；如需真人客服協助，隨時告訴我們即可。\n\n';
 
 /**
  * Forwards the exact raw webhook body to EasyStore's LINE webhook endpoint,
