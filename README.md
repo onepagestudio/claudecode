@@ -61,6 +61,7 @@ curl http://localhost:3000/
 | `LINE_CHANNEL_SECRET` | LINE Developers Console → 你的頻道 → Basic settings 分頁 → Channel secret | 必填 |
 | `ANTHROPIC_API_KEY` | https://console.anthropic.com → API Keys | 必填 |
 | `EASYSTORE_WEBHOOK_URL` | 你現有 EasyStore LINE 整合設定裡的 webhook 網址（含 `channel_id`、`store_token`） | 只有用 `relay-server.js`（共存版）才需要 |
+| `ADMIN_SECRET` | 自己設定一組密碼 | 想用 `/admin` 暫停 AI 自動回覆功能才需要，見第 9 節 |
 
 選填：
 
@@ -125,6 +126,7 @@ ngrok http 3000            # 另開一個終端機執行
    | `LINE_CHANNEL_SECRET` | 你的 secret |
    | `ANTHROPIC_API_KEY` | 你的 API key |
    | `EASYSTORE_WEBHOOK_URL` | 你的 EasyStore LINE webhook 網址 |
+   | `ADMIN_SECRET` | 自己設一組密碼（用來登入 `/admin` 暫停面板，見第 9 節） |
    | `CLAUDE_MODEL` | `claude-haiku-4-5`（可選，省成本） |
 
 4. 部署完成後會得到 `https://<服務名稱>.onrender.com`，webhook URL 即為
@@ -161,7 +163,24 @@ ngrok http 3000            # 另開一個終端機執行
 6. 用 LINE **Push API**（不是 Reply API）把回覆送給顧客，避免跟 EasyStore 搶同一個 replyToken
 7. 任何一步出錯都會被攔截並記錄 log，不會讓伺服器當掉；webhook 一律回應 200 給 LINE 避免觸發重試風暴
 
-## 9. 之後若要完全脫離 EasyStore
+## 9. 親自回覆客人時，暫停 AI 自動回覆
+
+LINE 沒有「這則訊息已經有人工回覆」的通知，機器人沒辦法自動偵測到你正在親自處理某位客人。
+所以提供一個簡單的手動開關：**`/admin` 控制台**，暫停期間所有客人的訊息仍會照常轉發給
+EasyStore（後台看得到），只是 AI 不會另外推送回覆，避免你跟 AI 同時回覆同一位客人。
+
+**使用方式：**
+
+1. 瀏覽器打開 `https://<你的部署網址>/admin`（本機測試是 `http://localhost:3000/admin`）
+2. 瀏覽器會跳出帳號密碼視窗：帳號可以隨便填（例如 `admin`），密碼填 `.env` 裡的 `ADMIN_SECRET`
+3. 點「暫停 15/30/60 分鐘」——這段時間內 AI 不會推送回覆
+4. 處理完客人後，回到這個網頁點「立即恢復 AI 回覆」，或等時間到自動恢復
+
+> 這是**全域**開關（暫停時對所有客人都暫停，不是只針對單一顧客），也是**記憶體暫存**狀態——
+> 如果 Render 服務重新部署或重啟，暫停狀態會重置為「正常運作」。
+> 建議把這個網址加到手機瀏覽器書籤，方便隨時暫停/恢復。
+
+## 10. 之後若要完全脫離 EasyStore
 
 如果之後決定不再用 EasyStore 處理這個 LINE 帳號，改成完全由這支機器人負責：
 

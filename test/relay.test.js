@@ -3,12 +3,13 @@ const assert = require('node:assert/strict');
 const crypto = require('crypto');
 const request = require('supertest');
 
-const { createRelayApp, DEFAULT_BOT_LABEL } = require('../relay-server');
+const { createRelayApp, createMuteState, DEFAULT_BOT_LABEL } = require('../relay-server');
 const { buildSystemPrompt } = require('../server');
 
 const CHANNEL_SECRET = 'test-channel-secret';
 const CHANNEL_ACCESS_TOKEN = 'test-channel-access-token';
 const EASYSTORE_URL = 'https://api.easystore.co/admin/v2/line/webhook?channel_id=123&store_token=abc';
+const ADMIN_SECRET = 'test-admin-secret';
 
 function sign(bodyString, secret = CHANNEL_SECRET) {
   return crypto.createHmac('sha256', secret).update(bodyString).digest('base64');
@@ -61,16 +62,21 @@ function buildTestApp(overrides = {}) {
   const anthropicClient = overrides.anthropicClient || fakeAnthropicClient();
   const forwardSpy = overrides.forwardSpy || fakeForwardSpy();
   const pushSpy = overrides.pushSpy || fakePushSpy();
+  const muteState = overrides.muteState || createMuteState();
   const app = createRelayApp({
     anthropicClient,
     lineChannelAccessToken: CHANNEL_ACCESS_TOKEN,
     lineChannelSecret: CHANNEL_SECRET,
     easyStoreWebhookUrl: EASYSTORE_URL,
+    adminSecret: Object.prototype.hasOwnProperty.call(overrides, 'adminSecret')
+      ? overrides.adminSecret
+      : ADMIN_SECRET,
     systemPrompt: buildSystemPrompt('(test knowledge base)'),
     forwardImpl: forwardSpy.impl,
     pushImpl: pushSpy.impl,
+    muteState,
   });
-  return { app, forwardSpy, pushSpy };
+  return { app, forwardSpy, pushSpy, muteState };
 }
 
 test('GET / returns a healthy relay status', async () => {
@@ -176,4 +182,89 @@ test('POST /webhook still pushes our reply even if the EasyStore forward fails',
 
   assert.equal(res.status, 200, 'relay must not crash or fail the whole request when the forward fails');
   assert.equal(pushSpy.calls.length, 1, 'our push is independent of the EasyStore forward outcome');
+});
+
+test('createMuteState: isMuted reflects muteFor/resume', () => {
+  const muteState = createMuteState();
+  assert.equal(muteState.isMuted(), false);
+
+  muteState.muteFor(60_000);
+  assert.equal(muteState.isMuted(), true);
+
+  muteState.resume();
+  assert.equal(muteState.isMuted(), false);
+});
+
+test('GET /admin without credentials is rejected', async () => {
+  const { app } = buildTestApp();
+  const res = await request(app).get('/admin');
+  assert.equal(res.status, 401);
+});
+
+test('GET /admin with the wrong password is rejected', async () => {
+  const { app } = buildTestApp();
+  const res = await request(app).get('/admin').auth('anything', 'wrong-password');
+  assert.equal(res.status, 401);
+});
+
+test('GET /admin returns 503 when ADMIN_SECRET is not configured', async () => {
+  const { app } = buildTestApp({ adminSecret: undefined });
+  const res = await request(app).get('/admin').auth('anything', 'whatever');
+  assert.equal(res.status, 503);
+});
+
+test('GET /admin with the correct password shows current status', async () => {
+  const { app } = buildTestApp();
+  const res = await request(app).get('/admin').auth('admin', ADMIN_SECRET);
+  assert.equal(res.status, 200);
+  assert.match(res.text, /目前正常自動回覆中/);
+});
+
+test('POST /admin/pause stops the bot from pushing replies, but EasyStore still gets forwarded', async () => {
+  const { app, forwardSpy, pushSpy, muteState } = buildTestApp();
+
+  const pauseRes = await request(app)
+    .post('/admin/pause')
+    .auth('admin', ADMIN_SECRET)
+    .type('form')
+    .send({ minutes: '30' });
+  assert.equal(pauseRes.status, 302);
+  assert.equal(muteState.isMuted(), true);
+
+  const payload = lineTextEvent('店主正在親自回覆，這則不該被 AI 搶答');
+  const bodyString = JSON.stringify(payload);
+  const signature = sign(bodyString);
+
+  const res = await request(app)
+    .post('/webhook')
+    .set('Content-Type', 'application/json')
+    .set('x-line-signature', signature)
+    .send(bodyString);
+
+  assert.equal(res.status, 200);
+  assert.equal(pushSpy.calls.length, 0, 'AI must not push a reply while paused');
+  assert.equal(forwardSpy.calls.length, 1, 'EasyStore must still receive the message while paused');
+});
+
+test('POST /admin/resume re-enables pushing replies', async () => {
+  const muteState = createMuteState();
+  muteState.muteFor(60_000);
+  const { app, pushSpy } = buildTestApp({ muteState });
+
+  const resumeRes = await request(app).post('/admin/resume').auth('admin', ADMIN_SECRET);
+  assert.equal(resumeRes.status, 302);
+  assert.equal(muteState.isMuted(), false);
+
+  const payload = lineTextEvent('暫停解除後這則應該正常回覆');
+  const bodyString = JSON.stringify(payload);
+  const signature = sign(bodyString);
+
+  const res = await request(app)
+    .post('/webhook')
+    .set('Content-Type', 'application/json')
+    .set('x-line-signature', signature)
+    .send(bodyString);
+
+  assert.equal(res.status, 200);
+  assert.equal(pushSpy.calls.length, 1, 'AI should push replies again after resume');
 });

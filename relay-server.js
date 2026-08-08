@@ -21,6 +21,12 @@
 // Railway. server.js remains available for a future full migration off
 // EasyStore, where LINE's Webhook URL would point at server.js's /webhook
 // (using the Reply API directly) instead.
+//
+// A password-protected /admin panel (HTTP Basic Auth via ADMIN_SECRET) lets
+// the shop owner pause the bot's own push replies while they're personally
+// handling a conversation, since LINE has no "a human already replied"
+// webhook event to detect that automatically. EasyStore forwarding keeps
+// running even while paused.
 
 require('dotenv').config();
 
@@ -127,6 +133,85 @@ async function pushToLine({
   }
 }
 
+/**
+ * Tracks a single global "human is handling replies right now" switch.
+ * In-memory only (resets on redeploy/restart) — deliberately simple since
+ * this is a one-person-shop manual override, not a durable setting.
+ */
+function createMuteState() {
+  let mutedUntil = 0;
+  return {
+    isMuted: () => Date.now() < mutedUntil,
+    muteFor: (ms) => {
+      mutedUntil = Date.now() + ms;
+      return mutedUntil;
+    },
+    resume: () => {
+      mutedUntil = 0;
+    },
+    getMutedUntil: () => mutedUntil,
+  };
+}
+
+function renderAdminPage(muteState) {
+  const muted = muteState.isMuted();
+  const mutedUntilText = muted
+    ? new Date(muteState.getMutedUntil()).toLocaleString('zh-TW', { hour12: false, timeZone: 'Asia/Taipei' })
+    : '';
+  const statusText = muted
+    ? `目前暫停中，將於 ${mutedUntilText}（台灣時間）自動恢復`
+    : '目前正常自動回覆中';
+
+  return `<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>DUMO 客服機器人控制台</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang TC", sans-serif; max-width: 480px; margin: 40px auto; padding: 0 16px; color: #222; }
+  h1 { font-size: 20px; }
+  .status { padding: 16px; border-radius: 8px; margin: 16px 0; font-weight: 600; }
+  .status.on { background: #e6f4ea; color: #1e7e34; }
+  .status.off { background: #fdecea; color: #b3261e; }
+  form { display: inline-block; margin: 4px 8px 4px 0; }
+  button { padding: 10px 16px; border-radius: 6px; border: 1px solid #ccc; background: #fff; cursor: pointer; font-size: 14px; }
+  button.primary { background: #111; color: #fff; border-color: #111; }
+  .hint { color: #666; font-size: 13px; margin-top: 24px; line-height: 1.6; }
+</style>
+</head>
+<body>
+<h1>DUMO 客服機器人控制台</h1>
+<div class="status ${muted ? 'off' : 'on'}">${muted ? '🔴' : '🟢'} ${statusText}</div>
+<form method="POST" action="/admin/pause"><input type="hidden" name="minutes" value="15" /><button>暫停 15 分鐘</button></form>
+<form method="POST" action="/admin/pause"><input type="hidden" name="minutes" value="30" /><button>暫停 30 分鐘</button></form>
+<form method="POST" action="/admin/pause"><input type="hidden" name="minutes" value="60" /><button>暫停 60 分鐘</button></form>
+<form method="POST" action="/admin/resume"><button class="primary">立即恢復 AI 回覆</button></form>
+<p class="hint">暫停期間，客人的訊息仍會照常轉發到 EasyStore 後台；只是 AI 不會另外推送回覆，方便你親自回覆時不會撞在一起。</p>
+</body>
+</html>`;
+}
+
+/** Minimal HTTP Basic Auth gate for the admin panel. Not timing-safe on
+ * purpose — this protects a low-stakes internal toggle for a single owner,
+ * not a system with real attackers in its threat model. */
+function requireAdminAuth(adminSecret) {
+  return (req, res, next) => {
+    if (!adminSecret) {
+      return res.status(503).send('Admin panel not configured (set ADMIN_SECRET).');
+    }
+    const authHeader = req.get('authorization') || '';
+    const [scheme, encoded] = authHeader.split(' ');
+    if (scheme === 'Basic' && encoded) {
+      const decoded = Buffer.from(encoded, 'base64').toString('utf-8');
+      const password = decoded.slice(decoded.indexOf(':') + 1);
+      if (password === adminSecret) return next();
+    }
+    res.set('WWW-Authenticate', 'Basic realm="DUMO Bot Admin"');
+    return res.status(401).send('Authentication required');
+  };
+}
+
 async function handleEventViaPush(event, ctx) {
   try {
     if (!event || event.type !== 'message' || !event.message || event.message.type !== 'text') {
@@ -134,6 +219,10 @@ async function handleEventViaPush(event, ctx) {
     }
     const userId = event.source && event.source.userId;
     if (!userId) return; // group/room events without a resolvable user are skipped by this relay
+
+    if (ctx.muteState && ctx.muteState.isMuted()) {
+      return; // a human is handling replies right now — still forwarded to EasyStore separately
+    }
 
     const replyText = await getClaudeReply({
       anthropicClient: ctx.anthropicClient,
@@ -161,14 +250,42 @@ function createRelayApp({
   systemPrompt,
   model = DEFAULT_MODEL,
   botLabel = DEFAULT_BOT_LABEL,
+  adminSecret,
   fetchImpl = fetch,
   forwardImpl = forwardToEasyStore,
   pushImpl = pushToLine,
+  muteState = createMuteState(),
 }) {
   const app = express();
 
   app.get('/', (req, res) => {
-    res.status(200).json({ status: 'ok', service: 'line-bot-relay', time: new Date().toISOString() });
+    res.status(200).json({
+      status: 'ok',
+      service: 'line-bot-relay',
+      aiPaused: muteState.isMuted(),
+      time: new Date().toISOString(),
+    });
+  });
+
+  app.get('/admin', requireAdminAuth(adminSecret), (req, res) => {
+    res.set('Content-Type', 'text/html; charset=utf-8');
+    res.send(renderAdminPage(muteState));
+  });
+
+  app.post(
+    '/admin/pause',
+    requireAdminAuth(adminSecret),
+    express.urlencoded({ extended: false }),
+    (req, res) => {
+      const minutes = parseInt(req.body?.minutes, 10) || 30;
+      muteState.muteFor(minutes * 60 * 1000);
+      res.redirect('/admin');
+    }
+  );
+
+  app.post('/admin/resume', requireAdminAuth(adminSecret), (req, res) => {
+    muteState.resume();
+    res.redirect('/admin');
   });
 
   app.post('/webhook', express.raw({ type: '*/*', limit: '2mb' }), async (req, res) => {
@@ -207,6 +324,7 @@ function createRelayApp({
             botLabel,
             fetchImpl,
             pushImpl,
+            muteState,
           })
         ),
       ]);
@@ -239,6 +357,9 @@ if (require.main === module) {
   if (missing.length > 0) {
     console.warn(`[Relay Startup] Missing environment variables: ${missing.join(', ')}.`);
   }
+  if (!process.env.ADMIN_SECRET) {
+    console.warn('[Relay Startup] ADMIN_SECRET not set — the /admin pause panel will be disabled.');
+  }
 
   const knowledgeBaseText = loadKnowledgeBase();
   const systemPrompt = buildSystemPrompt(knowledgeBaseText);
@@ -251,6 +372,7 @@ if (require.main === module) {
     lineChannelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN,
     lineChannelSecret: process.env.LINE_CHANNEL_SECRET,
     easyStoreWebhookUrl: process.env.EASYSTORE_WEBHOOK_URL,
+    adminSecret: process.env.ADMIN_SECRET,
     systemPrompt,
     model,
   });
@@ -274,5 +396,6 @@ module.exports = {
   forwardToEasyStore,
   pushToLine,
   handleEventViaPush,
+  createMuteState,
   DEFAULT_BOT_LABEL,
 };

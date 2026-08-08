@@ -20,5 +20,7 @@ services:
         sync: false
       - key: EASYSTORE_WEBHOOK_URL
         sync: false
+      - key: ADMIN_SECRET
+        sync: false
       - key: CLAUDE_MODEL
         value: claude-haiku-4-5
