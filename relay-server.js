@@ -177,17 +177,18 @@ function renderAdminPage(muteState) {
   form { display: inline-block; margin: 4px 8px 4px 0; }
   button { padding: 10px 16px; border-radius: 6px; border: 1px solid #ccc; background: #fff; cursor: pointer; font-size: 14px; }
   button.primary { background: #111; color: #fff; border-color: #111; }
+  button.resume { background: #fff; color: #b3261e; border-color: #b3261e; }
   .hint { color: #666; font-size: 13px; margin-top: 24px; line-height: 1.6; }
 </style>
 </head>
 <body>
 <h1>DUMO 客服機器人控制台</h1>
 <div class="status ${muted ? 'off' : 'on'}">${muted ? '🔴' : '🟢'} ${statusText}</div>
-<form method="POST" action="/admin/pause"><input type="hidden" name="minutes" value="15" /><button>暫停 15 分鐘</button></form>
+<form method="POST" action="/admin/pause"><input type="hidden" name="minutes" value="15" /><button class="primary">暫停 15 分鐘（預設）</button></form>
 <form method="POST" action="/admin/pause"><input type="hidden" name="minutes" value="30" /><button>暫停 30 分鐘</button></form>
 <form method="POST" action="/admin/pause"><input type="hidden" name="minutes" value="60" /><button>暫停 60 分鐘</button></form>
-<form method="POST" action="/admin/resume"><button class="primary">立即恢復 AI 回覆</button></form>
-<p class="hint">暫停期間，客人的訊息仍會照常轉發到 EasyStore 後台；只是 AI 不會另外推送回覆，方便你親自回覆時不會撞在一起。</p>
+<form method="POST" action="/admin/resume"><button class="resume">立即恢復 AI 回覆</button></form>
+<p class="hint">要親自回覆客人時，先點「暫停 15 分鐘」再開始回覆；回完可以點「立即恢復」提早解除。暫停期間，客人的訊息仍會照常轉發到 EasyStore 後台，只是 AI 不會另外推送回覆。</p>
 </body>
 </html>`;
 }
