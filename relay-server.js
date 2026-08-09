@@ -48,12 +48,11 @@ const {
 const FORWARD_TIMEOUT_MS = 8000;
 const PUSH_TIMEOUT_MS = 10000;
 const LINE_TEXT_MAX_LENGTH = 5000;
-// No emoji here on purpose — the system prompt caps Claude's own reply at
-// one emoji per message, and this label is prepended to that reply, so
-// giving the label its own emoji too would push the combined message over
-// the limit.
+// This label already spends the message's one allowed emoji (see the
+// system prompt's emoji rule), so Claude's own reply that follows should
+// not add another one on top of it.
 const DEFAULT_BOT_LABEL =
-  '您好，這是 DUMO 獨茉的 AI 客服小幫手，為您優先解答常見問題；如需真人客服協助，隨時告訴我們即可。\n\n';
+  '您好，這是 DUMO 獨茉的自動回覆小幫手，為您優先解答常見問題；如需真人客服協助，請傳送「真人」，我將協助您轉接真人客服 🤍\n\n';
 
 /**
  * Forwards the exact raw webhook body to EasyStore's LINE webhook endpoint,
@@ -246,7 +245,7 @@ function requireAdminAuth(adminSecret) {
 // Edit this list any time; it's a plain substring match, case-sensitive.
 const HUMAN_REQUEST_KEYWORDS = ['真人'];
 const HUMAN_REQUEST_MUTE_MS = 60 * 60 * 1000; // 1 hour
-const HUMAN_HANDOFF_MESSAGE = '好的，將由真人客服為您服務，請稍候🤍';
+const HUMAN_HANDOFF_MESSAGE = '請稍後，我們的團隊會盡快回覆您！';
 
 /**
  * Tracks per-customer "a human should take this one" holds, separate from
