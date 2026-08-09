@@ -29,7 +29,7 @@
 // running even while paused.
 //
 // Separately, a customer's own message CAN be inspected — if it contains a
-// keyword like "真人" (asking for a human), the bot auto-mutes itself for
+// keyword like "客服" (asking for customer service), the bot auto-mutes itself for
 // just that customer for an hour and sends one fixed handoff line instead
 // of a Claude-generated reply. See HUMAN_REQUEST_KEYWORDS below to edit.
 
@@ -53,7 +53,7 @@ const LINE_TEXT_MAX_LENGTH = 5000;
 // This label already spends the message's one allowed emoji (see the
 // system prompt's emoji rule), so Claude's own reply that follows should
 // not add another one on top of it.
-const DEFAULT_BOT_LABEL = '您好，此為自動回覆，如需真人客服協助，請傳送「真人」🤍\n\n';
+const DEFAULT_BOT_LABEL = '此為自動回覆，如需真人客服協助，請傳送「客服」\n\n';
 
 /**
  * Forwards the exact raw webhook body to EasyStore's LINE webhook endpoint,
@@ -254,7 +254,7 @@ function requireAdminAuth(adminSecret) {
 // asking for a human — auto-mute AI replies to just that customer instead
 // of relying on the shop owner to notice and hit the global pause in time.
 // Edit this list any time; it's a plain substring match, case-sensitive.
-const HUMAN_REQUEST_KEYWORDS = ['真人'];
+const HUMAN_REQUEST_KEYWORDS = ['客服'];
 const HUMAN_REQUEST_MUTE_MS = 60 * 60 * 1000; // 1 hour
 const HUMAN_HANDOFF_MESSAGE = '請稍後，我們的團隊會盡快回覆您！';
 

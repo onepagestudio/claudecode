@@ -311,7 +311,7 @@ test('POST /admin/resume re-enables pushing replies', async () => {
   assert.equal(pushSpy.calls.length, 1, 'AI should push replies again after resume');
 });
 
-test('POST /admin/resume also clears a customer-specific "真人" hold (highest authority)', async () => {
+test('POST /admin/resume also clears a customer-specific "客服" hold (highest authority)', async () => {
   const anthropicClient = fakeAnthropicClient('一般回覆');
   const { app, pushSpy, humanRequestedMuteState } = buildTestApp({ anthropicClient });
   const userId = 'U_resume_override';
@@ -336,7 +336,7 @@ test('POST /admin/resume also clears a customer-specific "真人" hold (highest 
   assert.equal(pushSpy.calls[0].text, DEFAULT_BOT_LABEL + '一般回覆');
 });
 
-test('GET /admin/quick-resume also clears every customer-specific "真人" hold', async () => {
+test('GET /admin/quick-resume also clears every customer-specific "客服" hold', async () => {
   const muteState = createMuteState();
   const humanRequestedMuteState = createHumanRequestedMuteState();
   humanRequestedMuteState.muteUserFor('U_a', 60 * 60 * 1000);
@@ -358,10 +358,10 @@ test('createHumanRequestedMuteState: clearAll resets every user', () => {
   assert.equal(state.isMuted('U2'), false);
 });
 
-test('a customer message containing "真人" gets the fixed handoff reply, not a Claude-generated one', async () => {
+test('a customer message containing "客服" gets the fixed handoff reply, not a Claude-generated one', async () => {
   const { app, pushSpy } = buildTestApp();
 
-  const payload = lineTextEvent('我要找真人客服', 'U_wants_human');
+  const payload = lineTextEvent('我要找客服', 'U_wants_human');
   const bodyString = JSON.stringify(payload);
   const signature = sign(bodyString);
 
@@ -381,7 +381,7 @@ test('after asking for a human, that same customer stays muted on their next mes
   const { app, pushSpy } = buildTestApp({ anthropicClient });
   const userId = 'U_wants_human_2';
 
-  const firstPayload = lineTextEvent('真人在嗎', userId);
+  const firstPayload = lineTextEvent('客服在嗎', userId);
   const firstBody = JSON.stringify(firstPayload);
   await request(app)
     .post('/webhook')
@@ -404,7 +404,7 @@ test('after asking for a human, that same customer stays muted on their next mes
 test('asking for a human does not mute other customers', async () => {
   const { app, pushSpy } = buildTestApp();
 
-  const humanRequest = lineTextEvent('真人客服', 'U_asked_for_human');
+  const humanRequest = lineTextEvent('客服', 'U_asked_for_human');
   const humanBody = JSON.stringify(humanRequest);
   await request(app)
     .post('/webhook')
