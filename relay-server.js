@@ -263,7 +263,7 @@ const HUMAN_HANDOFF_MESSAGE = '請稍後，我們的團隊會盡快回覆您！'
 // The file is served statically from /assets — see ASSETS_DIR below. Until
 // the file actually exists there, this feature silently no-ops (falls
 // through to the normal Claude reply).
-const ONE_TO_ONE_PROCESS_IMAGE_FILENAME = '1to1-process.png';
+const ONE_TO_ONE_PROCESS_IMAGE_FILENAME = '1to1-process.jpg';
 const ASSETS_DIR = path.join(__dirname, 'assets');
 const ONE_TO_ONE_PROCESS_CAPTION = '這是 1:1 訂購的流程，給您參考。';
 function mentionsOneToOneProcess(text) {

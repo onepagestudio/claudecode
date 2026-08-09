@@ -108,7 +108,7 @@ ngrok http 3000            # 另開一個終端機執行
    - **Webhook URL**：貼上 relay 的網址 + `/webhook`（本機測試用 ngrok 網址；正式環境用第 6 節部署後的網址）
    - 點擊 **Verify**，應顯示 Success
    - 開啟 **Use webhook**
-4. 用手機 LINE App 傳一則文字訊息測試，應該會收到一則以「您好，這是 DUMO 獨茉的 AI 客服小幫手...」開頭的回覆
+4. 用手機 LINE App 傳一則文字訊息測試，應該會收到一則以「您好，此為自動回覆...」開頭的回覆
 
 ## 6. 部署到 Render 或 Railway
 
@@ -149,7 +149,7 @@ ngrok http 3000            # 另開一個終端機執行
 
 - **知識庫內容**（品牌資料、尺寸、1:1 流程、定價規則、FAQ 等）：編輯 `knowledge-base.md`，Markdown 格式即可，不需要改程式碼。內容依 A／B／C／D 分級——只有 A 會被機器人當作確定答案直接回覆，B/C/D 都會轉人工或僅供背景理解，詳見檔案開頭的說明。
 - **回覆語氣、硬性規則**：編輯 `server.js` 裡的 `buildSystemPrompt()` 函式。
-- **回覆前的品牌提示語**（目前是「您好，這是 DUMO 獨茉的 AI 客服小幫手...」）：編輯 `relay-server.js` 裡的 `DEFAULT_BOT_LABEL` 常數。
+- **回覆前的品牌提示語**（目前是「您好，此為自動回覆...」）：編輯 `relay-server.js` 裡的 `DEFAULT_BOT_LABEL` 常數。
 - 機器人只會根據知識庫的 A 級內容回答；沒有把握的問題會誠實告知顧客並轉真人客服跟進，不會編造答案。
 - 修改後：本機開發模式用 nodemon 會自動重啟；正式環境（Render/Railway）需要重新部署（`git push`）才會生效。
 
@@ -204,8 +204,8 @@ EasyStore（後台看得到），只是 AI 不會另外推送回覆，避免你�
 機器人會直接傳送官方的 1:1 訂購流程圖 + 一句「這是 1:1 訂購的流程，給您參考。」，不會呼叫 Claude
 生成文字說明。
 
-**設定方式：** 把流程圖檔案放到 `assets/1to1-process.png`（檔名要一樣），部署後就會自動生效
-——程式會透過 `/assets/1to1-process.png` 這個網址把圖片提供給 LINE，不需要另外設定環境變數。
+**設定方式：** 把流程圖檔案放到 `assets/1to1-process.jpg`（檔名要一樣），部署後就會自動生效
+——程式會透過 `/assets/1to1-process.jpg` 這個網址把圖片提供給 LINE，不需要另外設定環境變數。
 還沒放檔案之前，這個功能不會啟動，客人問到時會照舊由 Claude 正常文字回覆。
 
 想調整觸發的關鍵字或圖片說明文字，改 `relay-server.js` 裡的 `mentionsOneToOneProcess()` 函式

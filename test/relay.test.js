@@ -416,9 +416,8 @@ test('a customer asking about the 1:1 process gets the image + caption, not a Cl
   assert.deepEqual(pushSpy.calls[0].messages[1], { type: 'text', text: ONE_TO_ONE_PROCESS_CAPTION });
 });
 
-test('the 1:1 process image is skipped (falls through to Claude) when no image URL is configured', async () => {
-  const anthropicClient = fakeAnthropicClient('一般回覆');
-  const { app, pushSpy } = buildTestApp({ anthropicClient }); // no oneToOneProcessImageUrl override
+test('the 1:1 process image is auto-detected from assets/1to1-process.jpg without an explicit override', async () => {
+  const { app, pushSpy } = buildTestApp(); // no oneToOneProcessImageUrl override - relies on the real file on disk
 
   const payload = lineTextEvent('1:1 訂購流程是怎樣？', 'U_asks_process_2');
   const bodyString = JSON.stringify(payload);
@@ -430,5 +429,8 @@ test('the 1:1 process image is skipped (falls through to Claude) when no image U
 
   assert.equal(res.status, 200);
   assert.equal(pushSpy.calls.length, 1);
-  assert.equal(pushSpy.calls[0].text, DEFAULT_BOT_LABEL + '一般回覆');
+  assert.equal(pushSpy.calls[0].messages.length, 2);
+  assert.equal(pushSpy.calls[0].messages[0].type, 'image');
+  assert.match(pushSpy.calls[0].messages[0].originalContentUrl, /\/assets\/1to1-process\.jpg$/);
+  assert.deepEqual(pushSpy.calls[0].messages[1], { type: 'text', text: ONE_TO_ONE_PROCESS_CAPTION });
 });
