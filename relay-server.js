@@ -153,7 +153,7 @@ function createMuteState() {
   };
 }
 
-function renderAdminPage(muteState) {
+function renderAdminPage(muteState, quickLinks) {
   const muted = muteState.isMuted();
   const mutedUntilText = muted
     ? new Date(muteState.getMutedUntil()).toLocaleString('zh-TW', { hour12: false, timeZone: 'Asia/Taipei' })
@@ -189,7 +189,29 @@ function renderAdminPage(muteState) {
 <form method="POST" action="/admin/pause"><input type="hidden" name="minutes" value="60" /><button>暫停 60 分鐘</button></form>
 <form method="POST" action="/admin/resume"><button class="resume">立即恢復 AI 回覆</button></form>
 <p class="hint">要親自回覆客人時，先點「暫停 15 分鐘」再開始回覆；回完可以點「立即恢復」提早解除。暫停期間，客人的訊息仍會照常轉發到 EasyStore 後台，只是 AI 不會另外推送回覆。</p>
+
+<h2 style="font-size:16px;margin-top:32px;">一鍵網址（存成手機主畫面捷徑用）</h2>
+<p class="hint">把下面兩個網址加到手機主畫面（iPhone：分享 → 加入主畫面；Android：選單 → 加到主畫面），
+之後點圖示就會直接執行，不用再登入或按按鈕。網址裡帶有你的密碼，請不要分享給別人。</p>
+<p style="font-size:13px;word-break:break-all;background:#f5f5f5;padding:8px;border-radius:6px;">暫停 15 分鐘：<br /><a href="${quickLinks.pauseUrl}">${quickLinks.pauseUrl}</a></p>
+<p style="font-size:13px;word-break:break-all;background:#f5f5f5;padding:8px;border-radius:6px;">立即恢復：<br /><a href="${quickLinks.resumeUrl}">${quickLinks.resumeUrl}</a></p>
 </body>
+</html>`;
+}
+
+/** Tiny confirmation page for the one-tap quick-pause/quick-resume links. */
+function renderQuickActionPage(message) {
+  return `<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>DUMO 客服機器人控制台</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang TC", sans-serif; text-align: center; padding-top: 96px; font-size: 20px; color: #222; }
+</style>
+</head>
+<body>${message}</body>
 </html>`;
 }
 
@@ -269,8 +291,13 @@ function createRelayApp({
   });
 
   app.get('/admin', requireAdminAuth(adminSecret), (req, res) => {
+    const baseUrl = `${req.protocol}://${req.get('host')}`;
+    const quickLinks = {
+      pauseUrl: `${baseUrl}/admin/quick-pause?key=${encodeURIComponent(adminSecret)}&minutes=15`,
+      resumeUrl: `${baseUrl}/admin/quick-resume?key=${encodeURIComponent(adminSecret)}`,
+    };
     res.set('Content-Type', 'text/html; charset=utf-8');
-    res.send(renderAdminPage(muteState));
+    res.send(renderAdminPage(muteState, quickLinks));
   });
 
   app.post(
@@ -287,6 +314,30 @@ function createRelayApp({
   app.post('/admin/resume', requireAdminAuth(adminSecret), (req, res) => {
     muteState.resume();
     res.redirect('/admin');
+  });
+
+  // One-tap links meant to be saved as a home-screen shortcut/bookmark on a
+  // phone — auth is a ?key= query param instead of a Basic Auth prompt, so
+  // tapping the icon acts immediately with no login step. The secret riding
+  // in the URL (browser history, server access logs) is an accepted
+  // trade-off for a single-owner convenience toggle, not a hardened system.
+  app.get('/admin/quick-pause', (req, res) => {
+    if (!adminSecret || req.query.key !== adminSecret) {
+      return res.status(401).send('Unauthorized');
+    }
+    const minutes = parseInt(req.query.minutes, 10) || 15;
+    muteState.muteFor(minutes * 60 * 1000);
+    res.set('Content-Type', 'text/html; charset=utf-8');
+    res.send(renderQuickActionPage(`✅ AI 已暫停 ${minutes} 分鐘`));
+  });
+
+  app.get('/admin/quick-resume', (req, res) => {
+    if (!adminSecret || req.query.key !== adminSecret) {
+      return res.status(401).send('Unauthorized');
+    }
+    muteState.resume();
+    res.set('Content-Type', 'text/html; charset=utf-8');
+    res.send(renderQuickActionPage('✅ AI 已恢復自動回覆'));
   });
 
   app.post('/webhook', express.raw({ type: '*/*', limit: '2mb' }), async (req, res) => {

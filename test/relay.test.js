@@ -220,6 +220,37 @@ test('GET /admin with the correct password shows current status', async () => {
   assert.match(res.text, /目前正常自動回覆中/);
 });
 
+test('GET /admin includes bookmarkable quick-pause/quick-resume links with the secret embedded', async () => {
+  const { app } = buildTestApp();
+  const res = await request(app).get('/admin').auth('admin', ADMIN_SECRET);
+  assert.match(res.text, /\/admin\/quick-pause\?key=test-admin-secret&minutes=15/);
+  assert.match(res.text, /\/admin\/quick-resume\?key=test-admin-secret/);
+});
+
+test('GET /admin/quick-pause with the correct key mutes without needing Basic Auth', async () => {
+  const { app, muteState } = buildTestApp();
+  const res = await request(app).get('/admin/quick-pause').query({ key: ADMIN_SECRET, minutes: 15 });
+  assert.equal(res.status, 200);
+  assert.equal(muteState.isMuted(), true);
+});
+
+test('GET /admin/quick-pause with the wrong key is rejected and does not mute', async () => {
+  const { app, muteState } = buildTestApp();
+  const res = await request(app).get('/admin/quick-pause').query({ key: 'wrong', minutes: 15 });
+  assert.equal(res.status, 401);
+  assert.equal(muteState.isMuted(), false);
+});
+
+test('GET /admin/quick-resume with the correct key resumes', async () => {
+  const muteState = createMuteState();
+  muteState.muteFor(60_000);
+  const { app } = buildTestApp({ muteState });
+
+  const res = await request(app).get('/admin/quick-resume').query({ key: ADMIN_SECRET });
+  assert.equal(res.status, 200);
+  assert.equal(muteState.isMuted(), false);
+});
+
 test('POST /admin/pause stops the bot from pushing replies, but EasyStore still gets forwarded', async () => {
   const { app, forwardSpy, pushSpy, muteState } = buildTestApp();
 
