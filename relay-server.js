@@ -27,6 +27,11 @@
 // handling a conversation, since LINE has no "a human already replied"
 // webhook event to detect that automatically. EasyStore forwarding keeps
 // running even while paused.
+//
+// Separately, a customer's own message CAN be inspected — if it contains a
+// keyword like "真人" (asking for a human), the bot auto-mutes itself for
+// just that customer for an hour and sends one fixed handoff line instead
+// of a Claude-generated reply. See HUMAN_REQUEST_KEYWORDS below to edit.
 
 require('dotenv').config();
 
@@ -235,6 +240,32 @@ function requireAdminAuth(adminSecret) {
   };
 }
 
+// If a customer's own message contains one of these, treat it as them
+// asking for a human — auto-mute AI replies to just that customer instead
+// of relying on the shop owner to notice and hit the global pause in time.
+// Edit this list any time; it's a plain substring match, case-sensitive.
+const HUMAN_REQUEST_KEYWORDS = ['真人'];
+const HUMAN_REQUEST_MUTE_MS = 60 * 60 * 1000; // 1 hour
+const HUMAN_HANDOFF_MESSAGE = '好的，將由真人客服為您服務，請稍候🤍';
+
+/**
+ * Tracks per-customer "a human should take this one" holds, separate from
+ * the global admin-panel pause. In-memory only, same trade-off as
+ * createMuteState — fine for a single-shop deployment, resets on restart.
+ */
+function createHumanRequestedMuteState() {
+  const mutedUntilByUser = new Map();
+  return {
+    isMuted: (userId) => {
+      const until = mutedUntilByUser.get(userId);
+      return typeof until === 'number' && Date.now() < until;
+    },
+    muteUserFor: (userId, ms) => {
+      mutedUntilByUser.set(userId, Date.now() + ms);
+    },
+  };
+}
+
 async function handleEventViaPush(event, ctx) {
   try {
     if (!event || event.type !== 'message' || !event.message || event.message.type !== 'text') {
@@ -247,9 +278,28 @@ async function handleEventViaPush(event, ctx) {
       return; // a human is handling replies right now — still forwarded to EasyStore separately
     }
 
+    const text = event.message.text;
+
+    if (ctx.humanRequestedMuteState && ctx.humanRequestedMuteState.isMuted(userId)) {
+      return; // this customer already asked for a human recently — stay quiet
+    }
+
+    if (HUMAN_REQUEST_KEYWORDS.some((keyword) => text.includes(keyword))) {
+      if (ctx.humanRequestedMuteState) {
+        ctx.humanRequestedMuteState.muteUserFor(userId, HUMAN_REQUEST_MUTE_MS);
+      }
+      await ctx.pushImpl({
+        channelAccessToken: ctx.lineChannelAccessToken,
+        userId,
+        text: HUMAN_HANDOFF_MESSAGE,
+        fetchImpl: ctx.fetchImpl,
+      });
+      return;
+    }
+
     const replyText = await getClaudeReply({
       anthropicClient: ctx.anthropicClient,
-      userText: event.message.text,
+      userText: text,
       systemPrompt: ctx.systemPrompt,
       model: ctx.model,
     });
@@ -278,6 +328,7 @@ function createRelayApp({
   forwardImpl = forwardToEasyStore,
   pushImpl = pushToLine,
   muteState = createMuteState(),
+  humanRequestedMuteState = createHumanRequestedMuteState(),
 }) {
   const app = express();
 
@@ -377,6 +428,7 @@ function createRelayApp({
             fetchImpl,
             pushImpl,
             muteState,
+            humanRequestedMuteState,
           })
         ),
       ]);
@@ -449,5 +501,7 @@ module.exports = {
   pushToLine,
   handleEventViaPush,
   createMuteState,
+  createHumanRequestedMuteState,
+  HUMAN_HANDOFF_MESSAGE,
   DEFAULT_BOT_LABEL,
 };

@@ -3,7 +3,13 @@ const assert = require('node:assert/strict');
 const crypto = require('crypto');
 const request = require('supertest');
 
-const { createRelayApp, createMuteState, DEFAULT_BOT_LABEL } = require('../relay-server');
+const {
+  createRelayApp,
+  createMuteState,
+  createHumanRequestedMuteState,
+  HUMAN_HANDOFF_MESSAGE,
+  DEFAULT_BOT_LABEL,
+} = require('../relay-server');
 const { buildSystemPrompt } = require('../server');
 
 const CHANNEL_SECRET = 'test-channel-secret';
@@ -63,6 +69,7 @@ function buildTestApp(overrides = {}) {
   const forwardSpy = overrides.forwardSpy || fakeForwardSpy();
   const pushSpy = overrides.pushSpy || fakePushSpy();
   const muteState = overrides.muteState || createMuteState();
+  const humanRequestedMuteState = overrides.humanRequestedMuteState || createHumanRequestedMuteState();
   const app = createRelayApp({
     anthropicClient,
     lineChannelAccessToken: CHANNEL_ACCESS_TOKEN,
@@ -75,8 +82,9 @@ function buildTestApp(overrides = {}) {
     forwardImpl: forwardSpy.impl,
     pushImpl: pushSpy.impl,
     muteState,
+    humanRequestedMuteState,
   });
-  return { app, forwardSpy, pushSpy, muteState };
+  return { app, forwardSpy, pushSpy, muteState, humanRequestedMuteState };
 }
 
 test('GET / returns a healthy relay status', async () => {
@@ -298,4 +306,80 @@ test('POST /admin/resume re-enables pushing replies', async () => {
 
   assert.equal(res.status, 200);
   assert.equal(pushSpy.calls.length, 1, 'AI should push replies again after resume');
+});
+
+test('a customer message containing "真人" gets the fixed handoff reply, not a Claude-generated one', async () => {
+  const { app, pushSpy } = buildTestApp();
+
+  const payload = lineTextEvent('我要找真人客服', 'U_wants_human');
+  const bodyString = JSON.stringify(payload);
+  const signature = sign(bodyString);
+
+  const res = await request(app)
+    .post('/webhook')
+    .set('Content-Type', 'application/json')
+    .set('x-line-signature', signature)
+    .send(bodyString);
+
+  assert.equal(res.status, 200);
+  assert.equal(pushSpy.calls.length, 1);
+  assert.equal(pushSpy.calls[0].text, HUMAN_HANDOFF_MESSAGE);
+});
+
+test('after asking for a human, that same customer stays muted on their next message', async () => {
+  const anthropicClient = fakeAnthropicClient('這不該被送出');
+  const { app, pushSpy } = buildTestApp({ anthropicClient });
+  const userId = 'U_wants_human_2';
+
+  const firstPayload = lineTextEvent('真人在嗎', userId);
+  const firstBody = JSON.stringify(firstPayload);
+  await request(app)
+    .post('/webhook')
+    .set('Content-Type', 'application/json')
+    .set('x-line-signature', sign(firstBody))
+    .send(firstBody);
+
+  const secondPayload = lineTextEvent('請問營業時間？', userId);
+  const secondBody = JSON.stringify(secondPayload);
+  const res = await request(app)
+    .post('/webhook')
+    .set('Content-Type', 'application/json')
+    .set('x-line-signature', sign(secondBody))
+    .send(secondBody);
+
+  assert.equal(res.status, 200);
+  assert.equal(pushSpy.calls.length, 1, 'the follow-up message must not get any reply while this customer is on hold');
+});
+
+test('asking for a human does not mute other customers', async () => {
+  const { app, pushSpy } = buildTestApp();
+
+  const humanRequest = lineTextEvent('真人客服', 'U_asked_for_human');
+  const humanBody = JSON.stringify(humanRequest);
+  await request(app)
+    .post('/webhook')
+    .set('Content-Type', 'application/json')
+    .set('x-line-signature', sign(humanBody))
+    .send(humanBody);
+
+  const otherCustomer = lineTextEvent('一副多少錢？', 'U_someone_else');
+  const otherBody = JSON.stringify(otherCustomer);
+  const res = await request(app)
+    .post('/webhook')
+    .set('Content-Type', 'application/json')
+    .set('x-line-signature', sign(otherBody))
+    .send(otherBody);
+
+  assert.equal(res.status, 200);
+  assert.equal(pushSpy.calls.length, 2, 'the other customer should still get a normal reply');
+  assert.notEqual(pushSpy.calls[1].text, HUMAN_HANDOFF_MESSAGE);
+});
+
+test('createHumanRequestedMuteState: isMuted is per-user and time-limited', () => {
+  const state = createHumanRequestedMuteState();
+  assert.equal(state.isMuted('U1'), false);
+
+  state.muteUserFor('U1', 60_000);
+  assert.equal(state.isMuted('U1'), true);
+  assert.equal(state.isMuted('U2'), false, 'muting one user must not affect another');
 });
