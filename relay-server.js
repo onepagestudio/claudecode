@@ -35,6 +35,8 @@
 
 require('dotenv').config();
 
+const fs = require('fs');
+const path = require('path');
 const express = require('express');
 const { Anthropic } = require('@anthropic-ai/sdk');
 const {
@@ -51,8 +53,7 @@ const LINE_TEXT_MAX_LENGTH = 5000;
 // This label already spends the message's one allowed emoji (see the
 // system prompt's emoji rule), so Claude's own reply that follows should
 // not add another one on top of it.
-const DEFAULT_BOT_LABEL =
-  '您好，這是 DUMO 獨茉的自動回覆小幫手，為您優先解答常見問題；如需真人客服協助，請傳送「真人」，我將協助您轉接真人客服 🤍\n\n';
+const DEFAULT_BOT_LABEL = '您好，此為自動回覆，如需真人客服協助，請傳送「真人」🤍\n\n';
 
 /**
  * Forwards the exact raw webhook body to EasyStore's LINE webhook endpoint,
@@ -101,13 +102,23 @@ async function forwardToEasyStore({
  * the Reply API) so it never collides with EasyStore's use of the same
  * event's reply token. Never throws.
  */
+/**
+ * Sends one or more LINE message objects via the Push API. Accepts either
+ * `messages` (an array of raw LINE message objects — text, image, etc., max
+ * 5) or the older `text` shorthand (wrapped into a single text message) for
+ * backward compatibility.
+ */
 async function pushToLine({
   channelAccessToken,
   userId,
   text,
+  messages,
   timeoutMs = PUSH_TIMEOUT_MS,
   fetchImpl = fetch,
 }) {
+  const resolvedMessages =
+    messages || [{ type: 'text', text: String(text).slice(0, LINE_TEXT_MAX_LENGTH) }];
+
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -119,7 +130,7 @@ async function pushToLine({
       },
       body: JSON.stringify({
         to: userId,
-        messages: [{ type: 'text', text: String(text).slice(0, LINE_TEXT_MAX_LENGTH) }],
+        messages: resolvedMessages,
       }),
       signal: controller.signal,
     });
@@ -247,6 +258,20 @@ const HUMAN_REQUEST_KEYWORDS = ['真人'];
 const HUMAN_REQUEST_MUTE_MS = 60 * 60 * 1000; // 1 hour
 const HUMAN_HANDOFF_MESSAGE = '請稍後，我們的團隊會盡快回覆您！';
 
+// When a customer asks how the 1:1 ordering process works, send the
+// official step-by-step graphic instead of trying to describe it in text.
+// The file is served statically from /assets — see ASSETS_DIR below. Until
+// the file actually exists there, this feature silently no-ops (falls
+// through to the normal Claude reply).
+const ONE_TO_ONE_PROCESS_IMAGE_FILENAME = '1to1-process.png';
+const ASSETS_DIR = path.join(__dirname, 'assets');
+const ONE_TO_ONE_PROCESS_CAPTION = '這是 1:1 訂購的流程，給您參考。';
+function mentionsOneToOneProcess(text) {
+  const mentionsOneToOne = /1[:：]?1|一比一/.test(text);
+  const mentionsProcess = /流程|步驟|怎麼(訂|買|下單|客製)|訂購方式|教學/.test(text);
+  return mentionsOneToOne && mentionsProcess;
+}
+
 /**
  * Tracks per-customer "a human should take this one" holds, separate from
  * the global admin-panel pause. In-memory only, same trade-off as
@@ -296,6 +321,23 @@ async function handleEventViaPush(event, ctx) {
       return;
     }
 
+    if (ctx.oneToOneProcessImageUrl && mentionsOneToOneProcess(text)) {
+      await ctx.pushImpl({
+        channelAccessToken: ctx.lineChannelAccessToken,
+        userId,
+        messages: [
+          {
+            type: 'image',
+            originalContentUrl: ctx.oneToOneProcessImageUrl,
+            previewImageUrl: ctx.oneToOneProcessImageUrl,
+          },
+          { type: 'text', text: ONE_TO_ONE_PROCESS_CAPTION },
+        ],
+        fetchImpl: ctx.fetchImpl,
+      });
+      return;
+    }
+
     const replyText = await getClaudeReply({
       anthropicClient: ctx.anthropicClient,
       userText: text,
@@ -328,8 +370,13 @@ function createRelayApp({
   pushImpl = pushToLine,
   muteState = createMuteState(),
   humanRequestedMuteState = createHumanRequestedMuteState(),
+  oneToOneProcessImageUrl,
 }) {
   const app = express();
+
+  // Serves images referenced in bot replies (e.g. the 1:1 process graphic)
+  // at a public HTTPS URL, which LINE's image message type requires.
+  app.use('/assets', express.static(ASSETS_DIR));
 
   app.get('/', (req, res) => {
     res.status(200).json({
@@ -415,6 +462,13 @@ function createRelayApp({
 
       const events = Array.isArray(payload.events) ? payload.events : [];
 
+      const imagePath = path.join(ASSETS_DIR, ONE_TO_ONE_PROCESS_IMAGE_FILENAME);
+      const resolvedImageUrl =
+        oneToOneProcessImageUrl ||
+        (fs.existsSync(imagePath)
+          ? `${req.protocol}://${req.get('host')}/assets/${ONE_TO_ONE_PROCESS_IMAGE_FILENAME}`
+          : undefined);
+
       await Promise.allSettled([
         forwardPromise,
         ...events.map((event) =>
@@ -428,6 +482,7 @@ function createRelayApp({
             pushImpl,
             muteState,
             humanRequestedMuteState,
+            oneToOneProcessImageUrl: resolvedImageUrl,
           })
         ),
       ]);
@@ -501,6 +556,9 @@ module.exports = {
   handleEventViaPush,
   createMuteState,
   createHumanRequestedMuteState,
+  mentionsOneToOneProcess,
   HUMAN_HANDOFF_MESSAGE,
+  ONE_TO_ONE_PROCESS_CAPTION,
+  ONE_TO_ONE_PROCESS_IMAGE_FILENAME,
   DEFAULT_BOT_LABEL,
 };

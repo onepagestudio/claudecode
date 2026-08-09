@@ -7,7 +7,9 @@ const {
   createRelayApp,
   createMuteState,
   createHumanRequestedMuteState,
+  mentionsOneToOneProcess,
   HUMAN_HANDOFF_MESSAGE,
+  ONE_TO_ONE_PROCESS_CAPTION,
   DEFAULT_BOT_LABEL,
 } = require('../relay-server');
 const { buildSystemPrompt } = require('../server');
@@ -83,6 +85,7 @@ function buildTestApp(overrides = {}) {
     pushImpl: pushSpy.impl,
     muteState,
     humanRequestedMuteState,
+    oneToOneProcessImageUrl: overrides.oneToOneProcessImageUrl,
   });
   return { app, forwardSpy, pushSpy, muteState, humanRequestedMuteState };
 }
@@ -382,4 +385,50 @@ test('createHumanRequestedMuteState: isMuted is per-user and time-limited', () =
   state.muteUserFor('U1', 60_000);
   assert.equal(state.isMuted('U1'), true);
   assert.equal(state.isMuted('U2'), false, 'muting one user must not affect another');
+});
+
+test('mentionsOneToOneProcess matches "1:1" + a process word, not either alone', () => {
+  assert.equal(mentionsOneToOneProcess('請問 1:1 訂購流程是什麼？'), true);
+  assert.equal(mentionsOneToOneProcess('一比一的訂購方式是？'), true);
+  assert.equal(mentionsOneToOneProcess('1:1 多少錢？'), false, 'mentions 1:1 but not a process word');
+  assert.equal(mentionsOneToOneProcess('請問訂購流程是什麼？'), false, 'mentions process but not 1:1');
+});
+
+test('a customer asking about the 1:1 process gets the image + caption, not a Claude reply', async () => {
+  const { app, pushSpy } = buildTestApp({ oneToOneProcessImageUrl: 'https://example.com/1to1.png' });
+
+  const payload = lineTextEvent('1:1 訂購流程是怎樣？', 'U_asks_process');
+  const bodyString = JSON.stringify(payload);
+  const res = await request(app)
+    .post('/webhook')
+    .set('Content-Type', 'application/json')
+    .set('x-line-signature', sign(bodyString))
+    .send(bodyString);
+
+  assert.equal(res.status, 200);
+  assert.equal(pushSpy.calls.length, 1);
+  assert.equal(pushSpy.calls[0].messages.length, 2);
+  assert.deepEqual(pushSpy.calls[0].messages[0], {
+    type: 'image',
+    originalContentUrl: 'https://example.com/1to1.png',
+    previewImageUrl: 'https://example.com/1to1.png',
+  });
+  assert.deepEqual(pushSpy.calls[0].messages[1], { type: 'text', text: ONE_TO_ONE_PROCESS_CAPTION });
+});
+
+test('the 1:1 process image is skipped (falls through to Claude) when no image URL is configured', async () => {
+  const anthropicClient = fakeAnthropicClient('一般回覆');
+  const { app, pushSpy } = buildTestApp({ anthropicClient }); // no oneToOneProcessImageUrl override
+
+  const payload = lineTextEvent('1:1 訂購流程是怎樣？', 'U_asks_process_2');
+  const bodyString = JSON.stringify(payload);
+  const res = await request(app)
+    .post('/webhook')
+    .set('Content-Type', 'application/json')
+    .set('x-line-signature', sign(bodyString))
+    .send(bodyString);
+
+  assert.equal(res.status, 200);
+  assert.equal(pushSpy.calls.length, 1);
+  assert.equal(pushSpy.calls[0].text, DEFAULT_BOT_LABEL + '一般回覆');
 });
