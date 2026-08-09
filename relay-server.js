@@ -287,6 +287,11 @@ function createHumanRequestedMuteState() {
     muteUserFor: (userId, ms) => {
       mutedUntilByUser.set(userId, Date.now() + ms);
     },
+    // Lets the admin "resume" action override every per-customer hold at
+    // once, since there's no per-customer picker in the admin UI (yet).
+    clearAll: () => {
+      mutedUntilByUser.clear();
+    },
   };
 }
 
@@ -410,6 +415,7 @@ function createRelayApp({
 
   app.post('/admin/resume', requireAdminAuth(adminSecret), (req, res) => {
     muteState.resume();
+    humanRequestedMuteState.clearAll();
     res.redirect('/admin');
   });
 
@@ -433,6 +439,7 @@ function createRelayApp({
       return res.status(401).send('Unauthorized');
     }
     muteState.resume();
+    humanRequestedMuteState.clearAll();
     res.set('Content-Type', 'text/html; charset=utf-8');
     res.send(renderQuickActionPage('✅ AI 已恢復自動回覆'));
   });

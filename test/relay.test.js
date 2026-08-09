@@ -311,6 +311,53 @@ test('POST /admin/resume re-enables pushing replies', async () => {
   assert.equal(pushSpy.calls.length, 1, 'AI should push replies again after resume');
 });
 
+test('POST /admin/resume also clears a customer-specific "真人" hold (highest authority)', async () => {
+  const anthropicClient = fakeAnthropicClient('一般回覆');
+  const { app, pushSpy, humanRequestedMuteState } = buildTestApp({ anthropicClient });
+  const userId = 'U_resume_override';
+
+  humanRequestedMuteState.muteUserFor(userId, 60 * 60 * 1000);
+  assert.equal(humanRequestedMuteState.isMuted(userId), true);
+
+  const resumeRes = await request(app).post('/admin/resume').auth('admin', ADMIN_SECRET);
+  assert.equal(resumeRes.status, 302);
+  assert.equal(humanRequestedMuteState.isMuted(userId), false, 'resume must clear the per-customer hold too');
+
+  const payload = lineTextEvent('請問營業時間？', userId);
+  const bodyString = JSON.stringify(payload);
+  const res = await request(app)
+    .post('/webhook')
+    .set('Content-Type', 'application/json')
+    .set('x-line-signature', sign(bodyString))
+    .send(bodyString);
+
+  assert.equal(res.status, 200);
+  assert.equal(pushSpy.calls.length, 1);
+  assert.equal(pushSpy.calls[0].text, DEFAULT_BOT_LABEL + '一般回覆');
+});
+
+test('GET /admin/quick-resume also clears every customer-specific "真人" hold', async () => {
+  const muteState = createMuteState();
+  const humanRequestedMuteState = createHumanRequestedMuteState();
+  humanRequestedMuteState.muteUserFor('U_a', 60 * 60 * 1000);
+  humanRequestedMuteState.muteUserFor('U_b', 60 * 60 * 1000);
+  const { app } = buildTestApp({ muteState, humanRequestedMuteState });
+
+  const res = await request(app).get('/admin/quick-resume').query({ key: ADMIN_SECRET });
+  assert.equal(res.status, 200);
+  assert.equal(humanRequestedMuteState.isMuted('U_a'), false);
+  assert.equal(humanRequestedMuteState.isMuted('U_b'), false);
+});
+
+test('createHumanRequestedMuteState: clearAll resets every user', () => {
+  const state = createHumanRequestedMuteState();
+  state.muteUserFor('U1', 60_000);
+  state.muteUserFor('U2', 60_000);
+  state.clearAll();
+  assert.equal(state.isMuted('U1'), false);
+  assert.equal(state.isMuted('U2'), false);
+});
+
 test('a customer message containing "真人" gets the fixed handoff reply, not a Claude-generated one', async () => {
   const { app, pushSpy } = buildTestApp();
 
