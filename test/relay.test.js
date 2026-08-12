@@ -135,7 +135,7 @@ test('POST /webhook forwards the raw body to EasyStore and pushes a labeled Clau
   assert.equal(pushSpy.calls.length, 1);
   assert.equal(pushSpy.calls[0].userId, 'U_real_user');
   assert.equal(pushSpy.calls[0].channelAccessToken, CHANNEL_ACCESS_TOKEN);
-  assert.equal(pushSpy.calls[0].text, DEFAULT_BOT_LABEL + '您好，這是測試回覆。');
+  assert.equal(pushSpy.calls[0].text, '您好，這是測試回覆。' + DEFAULT_BOT_LABEL);
 });
 
 test('POST /webhook still forwards non-text events to EasyStore but does not push', async () => {
@@ -333,7 +333,7 @@ test('POST /admin/resume also clears a customer-specific "客服" hold (highest 
 
   assert.equal(res.status, 200);
   assert.equal(pushSpy.calls.length, 1);
-  assert.equal(pushSpy.calls[0].text, DEFAULT_BOT_LABEL + '一般回覆');
+  assert.equal(pushSpy.calls[0].text, '一般回覆' + DEFAULT_BOT_LABEL);
 });
 
 test('GET /admin/quick-resume also clears every customer-specific "客服" hold', async () => {

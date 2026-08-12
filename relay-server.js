@@ -53,7 +53,7 @@ const LINE_TEXT_MAX_LENGTH = 5000;
 // This label already spends the message's one allowed emoji (see the
 // system prompt's emoji rule), so Claude's own reply that follows should
 // not add another one on top of it.
-const DEFAULT_BOT_LABEL = '此為自動回覆，如需真人客服協助，請傳送「客服」\n\n';
+const DEFAULT_BOT_LABEL = '\n\n此為自動回覆，如需真人客服協助，請傳送「客服」';
 
 /**
  * Forwards the exact raw webhook body to EasyStore's LINE webhook endpoint,
@@ -353,7 +353,7 @@ async function handleEventViaPush(event, ctx) {
     await ctx.pushImpl({
       channelAccessToken: ctx.lineChannelAccessToken,
       userId,
-      text: ctx.botLabel + replyText,
+      text: replyText + ctx.botLabel,
       fetchImpl: ctx.fetchImpl,
     });
   } catch (err) {
